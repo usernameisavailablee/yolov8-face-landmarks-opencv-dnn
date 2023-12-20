@@ -38,7 +38,7 @@ class YOLOv8_face:
         x_sum = np.sum(x_exp, axis=axis, keepdims=True)
         s = x_exp / x_sum
         return s
-    
+
     def resize_image(self, srcimg, keep_ratio=True):
         top, left, newh, neww = 0, 0, self.input_width, self.input_height
         if keep_ratio and srcimg.shape[0] != srcimg.shape[1]:
@@ -80,7 +80,7 @@ class YOLOv8_face:
         for i, pred in enumerate(preds):
             stride = int(self.input_height/pred.shape[2])
             pred = pred.transpose((0, 2, 3, 1))
-            
+
             box = pred[..., :self.reg_max * 4]
             cls = 1 / (1 + np.exp(-pred[..., self.reg_max * 4:-15])).reshape((-1,1))
             kpts = pred[..., -15:].reshape((-1,15)) ### x1,y1,score1, ..., x5,y5,score5
@@ -107,18 +107,18 @@ class YOLOv8_face:
         bboxes = np.concatenate(bboxes, axis=0)
         scores = np.concatenate(scores, axis=0)
         landmarks = np.concatenate(landmarks, axis=0)
-    
+
         bboxes_wh = bboxes.copy()
         bboxes_wh[:, 2:4] = bboxes[:, 2:4] - bboxes[:, 0:2]  ####xywh
         classIds = np.argmax(scores, axis=1)
         confidences = np.max(scores, axis=1)  ####max_class_confidence
-        
+
         mask = confidences>self.conf_threshold
         bboxes_wh = bboxes_wh[mask]  ###合理使用广播法则
         confidences = confidences[mask]
         classIds = classIds[mask]
         landmarks = landmarks[mask]
-        
+
         indices = cv2.dnn.NMSBoxes(bboxes_wh.tolist(), confidences.tolist(), self.conf_threshold,
                                    self.iou_threshold).flatten()
         if len(indices) > 0:
@@ -142,7 +142,7 @@ class YOLOv8_face:
             x2 = np.clip(x2, 0, max_shape[1])
             y2 = np.clip(y2, 0, max_shape[0])
         return np.stack([x1, y1, x2, y2], axis=-1)
-    
+
     def draw_detections(self, image, boxes, scores, kpts):
         for box, score, kp in zip(boxes, scores, kpts):
             x, y, w, h = box.astype(int)
@@ -157,25 +157,48 @@ class YOLOv8_face:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--imgpath', type=str, default='images/2.jpg', help="image path")
-    parser.add_argument('--modelpath', type=str, default='weights/yolov8n-face.onnx',
-                        help="onnx filepath")
+    parser.add_argument('--modelpath', type=str, default='weights/yolov8n-face.onnx', help="onnx filepath")
     parser.add_argument('--confThreshold', default=0.45, type=float, help='class confidence')
     parser.add_argument('--nmsThreshold', default=0.5, type=float, help='nms iou thresh')
     args = parser.parse_args()
 
     # Initialize YOLOv8_face object detector
     YOLOv8_face_detector = YOLOv8_face(args.modelpath, conf_thres=args.confThreshold, iou_thres=args.nmsThreshold)
-    srcimg = cv2.imread(args.imgpath)
 
-    # Detect Objects
-    boxes, scores, classids, kpts = YOLOv8_face_detector.detect(srcimg)
+    # Start video capture from default camera (0)
+    cap = cv2.VideoCapture(0)
 
-    # Draw detections
-    dstimg = YOLOv8_face_detector.draw_detections(srcimg, boxes, scores, kpts)
-    #cv2.imwrite('result.jpg', dstimg)
-    winName = 'Deep learning face detection use OpenCV'
-    cv2.namedWindow(winName, 0)
-    cv2.imshow(winName, dstimg)
-    cv2.waitKey(0)
+    while True:
+        ret, frame = cap.read()  # Read frame from the camera
+
+        if not ret:
+            break
+
+        try:
+            # Detect Objects
+            boxes, scores, classids, kpts = YOLOv8_face_detector.detect(frame)
+
+            # If no faces detected, print message and continue to the next frame
+            if len(boxes) == 0:
+                print('Nothing detected')
+                cv2.imshow('Deep learning face detection use OpenCV', frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                continue
+
+            # Draw detections
+            dstimg = YOLOv8_face_detector.draw_detections(frame, boxes, scores, kpts)
+
+            # Show the resulting frame
+            cv2.imshow('Deep learning face detection use OpenCV', dstimg)
+
+        except Exception as e:
+            print(f"Нечего детектит")
+
+        # Press 'q' to exit
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Release the camera and close OpenCV windows
+    cap.release()
     cv2.destroyAllWindows()
